@@ -20,4 +20,6 @@ Emergency Contacts:
  Health Diary:
  1. User is able to get note of their daily activities and is able to delete entry at a later stage.
 
+BMI Calculator
+1. Calculates weight vs height to determine if individaul  is in a good condition obesse vs underweight vs in good weight.
 
