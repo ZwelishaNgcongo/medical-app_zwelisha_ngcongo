@@ -1,27 +1,92 @@
 import { useState } from "react";
 import "../styles/form.css";
 
-const SymptomForm = () => {
+const SymptomChecker = () => {
   const [symptoms, setSymptoms] = useState("");
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-
- 
- 
+  
   const BASE_URL = 'https://api.fda.gov/drug/event.json';
+
+  const filterSymptomMatches = (symptomList, results) => {
+    // Convert input symptoms to lowercase array and trim whitespace
+    const userSymptoms = symptomList
+      .split(',')
+      .map(s => s.trim().toLowerCase());
+
+    // Filter and analyze only matching symptoms
+    const symptomAnalysis = new Map();
+    const matchingCases = [];
+
+    results.forEach(result => {
+      const matchedSymptoms = result.patient.reaction
+        .filter(reaction => 
+          userSymptoms.some(symptom => 
+            reaction.reactionmeddrapt.toLowerCase().includes(symptom)
+          )
+        );
+
+      if (matchedSymptoms.length > 0) {
+        // Add to matching cases
+        matchingCases.push({
+          medications: result.patient.drug.map(drug => ({
+            name: drug.medicinalproduct,
+            dosage: drug.drugdosagetext || 'Not specified',
+            indication: drug.drugindication || 'Not specified'
+          })),
+          reactions: matchedSymptoms.map(reaction => ({
+            symptom: reaction.reactionmeddrapt,
+            outcome: reaction.reactionoutcome
+          })),
+          possibleConditions: Array.from(
+            new Set(
+              result.patient.drug
+                .map(drug => drug.drugindication)
+                .filter(Boolean)
+            )
+          )
+        });
+
+        // Analyze matching symptoms
+        matchedSymptoms.forEach(reaction => {
+          const symptom = reaction.reactionmeddrapt.toLowerCase();
+          if (!symptomAnalysis.has(symptom)) {
+            symptomAnalysis.set(symptom, {
+              count: 1,
+              medications: new Set(),
+              possibleConditions: new Set()
+            });
+          }
+
+          const analysis = symptomAnalysis.get(symptom);
+          result.patient.drug.forEach(drug => {
+            if (drug.medicinalproduct) {
+              analysis.medications.add(drug.medicinalproduct);
+            }
+            if (drug.drugindication) {
+              analysis.possibleConditions.add(drug.drugindication);
+            }
+          });
+        });
+      }
+    });
+
+    return {
+      analysis: symptomAnalysis,
+      cases: matchingCases
+    };
+  };
 
   const fetchHealthInfo = async (symptomList) => {
     try {
       setIsLoading(true);
-      /*  Converting symptoms to a search query */
       const searchTerms = symptomList
         .split(',')
         .map(s => s.trim())
         .join('+AND+');
 
-      const url = `${BASE_URL}?search=patient.reaction.reactionmeddrapt:"${searchTerms}"&limit=5`;
-      
+      const url = `${BASE_URL}?search=patient.reaction.reactionmeddrapt:"${searchTerms}"&limit=10`;
       const response = await fetch(url);
       
       if (!response.ok) {
@@ -29,20 +94,7 @@ const SymptomForm = () => {
       }
 
       const data = await response.json();
-      
-       /* Process and format the response data */
-      const formattedResults = data.results.map(result => ({
-        medications: result.patient.drug.map(drug => ({
-          name: drug.medicinalproduct,
-          dosage: drug.drugdosagetext || 'Not specified'
-        })),
-        reactions: result.patient.reaction.map(reaction => ({
-          symptom: reaction.reactionmeddrapt,
-          outcome: reaction.reactionoutcome
-        }))
-      }));
-
-      return formattedResults;
+      return filterSymptomMatches(symptomList, data.results);
     } catch (error) {
       console.error("Error fetching health data:", error);
       throw error;
@@ -61,7 +113,7 @@ const SymptomForm = () => {
     try {
       setError("");
       const response = await fetchHealthInfo(symptoms);
-      if (response && response.length > 0) {
+      if (response && response.cases.length > 0) {
         setResult(response);
       } else {
         setError("No matching conditions found. Please refine your symptoms.");
@@ -89,20 +141,57 @@ const SymptomForm = () => {
       
       {result && (
         <div className="result">
+          <div className="symptom-analysis">
+            <h3>Symptom Analysis</h3>
+            <div className="analysis-items">
+              {Array.from(result.analysis.entries()).map(([symptom, analysis]) => (
+                <div key={symptom} className="analysis-item">
+                  <h4>{symptom}</h4>
+                  {analysis.possibleConditions.size > 0 && (
+                    <div className="conditions">
+                      <p>Possible related conditions:</p>
+                      <ul>
+                        {Array.from(analysis.possibleConditions).map((condition, idx) => (
+                          <li key={idx}>{condition}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
           <h3>Related Health Information</h3>
-          {result.map((item, index) => (
+          {result.cases.map((item, index) => (
             <div key={index} className="result-item">
               <h4>Case {index + 1}</h4>
+              
+              {item.possibleConditions.length > 0 && (
+                <div className="conditions">
+                  <h5>Potential Conditions:</h5>
+                  <ul>
+                    {item.possibleConditions.map((condition, idx) => (
+                      <li key={idx}>{condition}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               <div className="medications">
                 <h5>Related Medications:</h5>
                 <ul>
                   {item.medications.map((med, medIndex) => (
                     <li key={medIndex}>
                       {med.name} - {med.dosage}
+                      {med.indication !== 'Not specified' && (
+                        <span className="indication"> (Used for: {med.indication})</span>
+                      )}
                     </li>
                   ))}
                 </ul>
               </div>
+
               <div className="reactions">
                 <h5>Reported Reactions:</h5>
                 <ul>
@@ -121,4 +210,4 @@ const SymptomForm = () => {
   );
 };
 
-export default SymptomForm;
+export default SymptomChecker;
